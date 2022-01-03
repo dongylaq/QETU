@@ -1,59 +1,75 @@
 from racbem import retrieve_unitary_matrix, retrieve_state
-from hadamard_block_encoding import HadamardBlockEncoding
-from hadamard_block_encoding import build_trotter_TFIM, build_TFIM_Hamiltonian
+import hadamard_block_encoding as hbe
 import numpy as np
 import scipy.linalg as la
 from qiskit import QuantumCircuit, execute, Aer
 from random_circuit import random_circuit
 from racbem import QSPCircuit
 from qiskit.tools.monitor import job_monitor
+from qiskit.providers.aer import AerSimulator
 import os
+import su2_qsp_toolbox as su2qsp
 
 PHI_DATA_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../phi_seq"
 
 if __name__ == "__main__":
-    print("===== test Hadamard Block-encoding =====")
-    qc = QuantumCircuit(2)
-    qc.h(0)
-    qc.cx(0,1)
-    print(qc.draw())
-    UA = retrieve_unitary_matrix(qc)
-    Id = np.eye(UA.shape[0])
-    ground_truth = 0.5j * np.block([[Id-UA, Id+UA], [Id+UA, Id-UA]])
-    had_blk_e = HadamardBlockEncoding()
-    had_blk_e.build_from_unitary(qc)
-    UBlkE = retrieve_unitary_matrix(had_blk_e.qc)
-    print("||circuit - ground_truth|| = {:.5e}\n".format(la.norm(ground_truth - UBlkE,2)))
-
-    print("random quantum circuit")
-    qc = random_circuit(5, 10, basis_gates=["x", "z", "h", "cx"])
-    UA = retrieve_unitary_matrix(qc)
-    Id = np.eye(UA.shape[0])
-    ground_truth = 0.5j * np.block([[Id-UA, Id+UA], [Id+UA, Id-UA]])
-    had_blk_e.build_from_unitary(qc)
-    UBlkE = retrieve_unitary_matrix(had_blk_e.qc)
-    print("||circuit - ground_truth|| = {:.5e}\n".format(la.norm(ground_truth - UBlkE,2)))
-
     print("===== test TFIM =====")
-    n_qubits = 5
+    # parameters
+    n_qubits = 3
     t_tot = 1/(2*n_qubits)
-    n_segments = 100
+    n_segments = 3
     g_coupling = 1
     pbc = False
+    tfim = hbe.transverse_field_Ising_model(n_qubits, g_coupling, pbc=pbc)
     print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {}".format(
         n_qubits, t_tot, n_segments, g_coupling, pbc
     ))
-    H = build_TFIM_Hamiltonian(n_qubits, g_coupling, pbc=pbc)
+    # exact and Trotterized Hamiltonian evolution
+    H = tfim.Hamiltonian
     U = la.expm(-1j*t_tot*H)
-    qc1 = build_trotter_TFIM(n_qubits, t_tot, n_segments, g_coupling, trotter_order=1, pbc=pbc)
-    Uqc1 = retrieve_unitary_matrix(qc1)
-    qc2 = build_trotter_TFIM(n_qubits, t_tot, n_segments, g_coupling, trotter_order=2, pbc=pbc)
-    Uqc2 = retrieve_unitary_matrix(qc2)
-    print("first order Trotter error {:.5e}".format(la.norm(U - Uqc1,2)))
-    print("second order Trotter error {:.5e}".format(la.norm(U - Uqc2,2)))
+    qc = hbe.build_trotter_TFIM(tfim, t_tot, n_segments, trotter_order=2)
+    Uqc = retrieve_unitary_matrix(qc)
+    print("second order Trotter error {:.5e}".format(la.norm(U - Uqc,2)))
 
-    # distance the spectrum separates from the edge 0, pi
+    # build controlled Hamiltonian evolution
+    had_blk_e = hbe.HadamardBlockEncoding()
+    had_blk_e.build_from_unitary_TFIM(qc)
+    U_ctrl_qc = retrieve_unitary_matrix(had_blk_e.qc)
+    U_exact_ctrl = la.block_diag(U.conjugate().transpose(), U)
+    print("controlled Trotter error {:.5e}".format(la.norm(U_exact_ctrl - U_ctrl_qc,2)))
+
+    # build SHIFTED controlled Hamiltonian evolution
+    shift = np.random.randn()
+    U = la.expm(-1j*(t_tot*H+shift*np.eye(2**n_qubits)))
+    had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
+    U_ctrl_qc = retrieve_unitary_matrix(had_blk_e.qc)
+    U_exact_ctrl = la.block_diag(U.conjugate().transpose(), U)
+    print("shifted controlled Trotter error {:.5e}".format(la.norm(U_exact_ctrl - U_ctrl_qc,2)))
+
+    print("\n===== test VQE type energy measurement =====")
+    state_circ = random_circuit(n_qubits+1, 20)
+    state = retrieve_state(state_circ)
+    state = state[:2**n_qubits]
+    succ_prob = la.norm(state,2)**2
+    print("succ prob = {:.3f}".format(succ_prob))
+    E_exact = np.real_if_close(state.conjugate() @ H @ state) / succ_prob
+    E_approx, _ = hbe.measure_energy_VQEType(tfim, state_circ, 1_000_000)
+    print("E_exact = \t{:.5f}\nE_approx = \t{:.5f}".format(E_exact, E_approx))
+
+    exit()
+
+    print("\n===== test QSVT X rot =====")
+    n_qubits = 5
+    n_segments = 10
+    g_coupling = 1
+    pbc = False
     dist = 0.1
+    tau = 0.5
+    tfim = hbe.transverse_field_Ising_model(n_qubits, g_coupling, pbc=pbc)
+    print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}".format(
+        n_qubits, t_tot, n_segments, g_coupling, pbc, dist
+    ))
+    H = tfim.Hamiltonian
     # shift and scale the spectrum to be in [dist, pi-dist]
     val_H, vec_H = la.eig(H)
     val_H = val_H.real
@@ -61,22 +77,37 @@ if __name__ == "__main__":
     val_H_max = val_H.max()
     c1 = (np.pi-2*dist) / (val_H_max - val_H_min)
     c2 = dist - c1 * val_H_min
-    t_tot = 1.0 * c1
-    angle = 1.0 * c2
+    t_tot = tau * c1
+    shift = tau * c2
+    dd = 10-1
+    phi_seq_su2_half = np.random.randn(dd+1)
+    phi_seq_su2 = np.zeros(dd*2+1)
+    phi_seq_su2[:dd+1] = phi_seq_su2_half
+    phi_seq_su2[dd+1:] = phi_seq_su2_half[-2::-1]
+    coef = su2qsp.build_Cheby_coef_from_phi_LS(phi_seq_su2)
+    val_H, vec_H = la.eig(H)
+    val_H = val_H.real
+    mat_exact = (-1)**dd * vec_H.transpose().conjugate() @ np.diag(
+        su2qsp.build_Cheby_fun_from_coef(np.cos(val_H*c1 + c2), coef, 0)
+    ) @ vec_H
+    phi_qc = hbe.convert_su2_to_Xrot(phi_seq_su2)
 
-    print("\n===== test shifted Hamiltonian =====")
-    print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}".format(
-        n_qubits, t_tot, n_segments, g_coupling, pbc, dist
-    ))
-    val_H_lt = c1 * val_H + c2
-    U_Hlt = vec_H @ np.diag(np.exp(-1j*val_H_lt)) @ vec_H.conjugate().transpose()
-    Id = np.eye(*U_Hlt.shape)
-    ground_truth = 0.5 * np.block([[Id-U_Hlt, Id+U_Hlt], [Id+U_Hlt, Id-U_Hlt]])
-    global_phase = 1j * np.exp(1j*angle/2)
-    qc2 = build_trotter_TFIM(n_qubits, t_tot, n_segments, g_coupling, trotter_order=2, pbc=pbc)
-    had_blk_e.build_from_unitary(qc2, angle=angle)
-    UBlkE = retrieve_unitary_matrix(had_blk_e.qc)
-    print("||circuit (2nd order) - ground_truth|| = {:.5e}\n".format(la.norm(global_phase * ground_truth - UBlkE),2))
+    qc = hbe.build_trotter_TFIM(tfim, t_tot, n_segments)
+    had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
+
+    state_circ = hbe.apply_qsvt_xrot(had_blk_e.qc, phi_qc)
+    circ = retrieve_unitary_matrix(state_circ)
+    circ = circ[:2**n_qubits, :2**n_qubits]
+    circ = mat_exact[0] / circ[0] * circ
+    print("||mat_exact - circ|| = {:.5f}".format(la.norm(mat_exact - circ, 2)))
+
+
+
+    # The overall formalism for TFIM implements F(cos(tH)) rather than F(cos(tH/2))
+    # in the previous construction. To make the phase factors consistent, t is set to 1/2
+    tau = 0.5
+    # distance the spectrum separates from the edge 0, pi
+    dist = 0.1
 
     print("\n===== test ground state preparation =====")
     n_qubits = 2
@@ -84,60 +115,49 @@ if __name__ == "__main__":
     g_coupling = 1
     pbc = False
     dist = 0.1
-    n_shots = 1e6
+    n_shots = 1_000_000
     deg = 20
+    tfim = hbe.transverse_field_Ising_model(n_qubits, g_coupling, pbc=pbc)
     print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}\ndeg = {:d}".format(
         n_qubits, t_tot, n_segments, g_coupling, pbc, dist, deg
     ))
-    H = build_TFIM_Hamiltonian(n_qubits, g_coupling, pbc=pbc)
+    H = tfim.Hamiltonian
     # shift and scale the spectrum to be in [dist, pi-dist]
     val_H, vec_H = la.eig(H)
     val_H = val_H.real
     val_H_min = val_H.min()
     val_H_max = val_H.max()
+    grd_state = vec_H[:, val_H.argmin()]
+
     c1 = (np.pi-2*dist) / (val_H_max - val_H_min)
     c2 = dist - c1 * val_H_min
-    t_tot = 1.0 * c1
-    angle = 1.0 * c2
-    qsp = QSPCircuit(1,1,n_qubits)
-    # load phase factors and the scaling constants
-    *phi_qc, scale_denom = np.loadtxt(f"{PHI_DATA_DIR}/ground_state/phi_gsp_n{n_qubits}_d{deg}.txt")
-    *phi_qc_H, scale_numer = np.loadtxt(f"{PHI_DATA_DIR}/ground_state/phi_gse_n{n_qubits}_d{deg}.txt")
-    # build quantum circuits
-    backend = Aer.get_backend('qasm_simulator')
-    qc2 = build_trotter_TFIM(n_qubits, t_tot, n_segments, g_coupling, trotter_order=2, pbc=pbc)
-    had_blk_e.build_from_unitary(qc2, angle=angle)
-    qsp.build_circuit(had_blk_e.qc, phi_qc, realpart=True, measure=True)
-    compiled_circ = qsp.qc
-    job = execute(compiled_circ, backend, shots = n_shots, optimization_level = 0)
-    job_monitor(job)
-    result = job.result()
-    counts = result.get_counts(compiled_circ)
-    if "00" in counts.keys():
-        prob_meas_denom = float(counts["00"]) / n_shots
-    else:
-        prob_meas_denom = 0.0
-    qsp.build_circuit(had_blk_e.qc, phi_qc_H, realpart=True, measure=True)
-    compiled_circ = qsp.qc
-    job = execute(compiled_circ, backend, shots = n_shots, optimization_level = 0)
-    job_monitor(job)
-    result = job.result()
-    counts = result.get_counts(compiled_circ)
-    if "00" in counts.keys():
-        prob_meas_numer = float(counts["00"]) / n_shots
-    else:
-        prob_meas_numer = 0.0
-    E_recon2_lt = ((prob_meas_numer/scale_numer) / (prob_meas_denom/scale_denom))
-    E_recon2 = (E_recon2_lt - c2) / c1
+    t_tot = tau * c1
+    shift = tau * c2
 
-    qsp.build_circuit(had_blk_e.qc, phi_qc, realpart=True, measure=False)
-    compiled_circ = qsp.qc
-    state = retrieve_state(compiled_circ)
-    grd_state = state[:2**n_qubits]
-    grd_state = grd_state / la.norm(grd_state, 2)
-    E_recon = np.real(grd_state @ H @ grd_state)
-    print("E_gs\t\t\t = {:.5f}\nE_recon (proj)\t\t = {:.5f}\nE_recon (2 meas)\t = {:.5f}".format(
-        val_H_min, E_recon, E_recon2
+    # load phase factors for ground state preparation
+    *phi_qc, _ = np.loadtxt(f"{PHI_DATA_DIR}/ground_state/phi_gsp_n{n_qubits}_d{deg}.txt")
+    # convert to the convention of X rotations
+    phi_qc = hbe.convert_Zrot_to_Xrot(phi_qc)
+    # build quantum circuits
+    qc = hbe.build_trotter_TFIM(tfim, t_tot, n_segments)
+    had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
+
+    U = la.expm(-1j*(t_tot*H+shift*np.eye(2**n_qubits)))
+    U_ctrl_qc = retrieve_unitary_matrix(had_blk_e.qc)
+    U_exact_ctrl = la.block_diag(U.conjugate().transpose(), U)
+    print("shifted controlled Trotter error {:.5e}".format(la.norm(U_exact_ctrl - U_ctrl_qc,2)))
+
+    state_circ = hbe.apply_qsvt_xrot(had_blk_e.qc, phi_qc)
+    state = retrieve_state(state_circ)
+    state = state[:2**n_qubits]
+    succ_prob = la.norm(state,2)**2
+    print("succ prob = {:.3f}".format(succ_prob))
+    state = grd_state[0] / state[0] * state
+    print("||grd_state - state_circ|| = {:.5f}".format(la.norm(grd_state - state, 2)))
+
+    E_approx, _ = hbe.measure_energy_VQEType(tfim, state_circ, n_shots)
+    print("E_gs\t\t\t = {:.5f}\nE_recon (proj)\t\t = {:.5f}".format(
+        val_H_min, E_approx
     ))
 
 
