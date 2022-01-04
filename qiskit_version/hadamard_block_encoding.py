@@ -130,53 +130,112 @@ class transverse_field_Ising_model(object):
             H = H - temp
         return H
 
-def build_trotter_TFIM(
-        tfim: transverse_field_Ising_model,
-        t_tot: float, 
-        n_segments: int, 
-        trotter_order: int = 2, 
-    ) -> QuantumCircuit:
-    """
-        Build the quantum circuit of the Trotterized evolution of TFIM.
-        Unitary Rep: exp(-i t H) where H = -\sum Z_iZ_{i+1} - g \sum X_i
-        Each Trotter step:
-        -[RZZ(1,2)]------------[RX(1)]-
-        -[RZZ(1,2)]-[RZZ(2,3)]-[RX(2)]-
-        -[RZZ(3,4)]-[RZZ(2,3)]-[RX(3)]-
-        -[RZZ(3,4)]------------[RX(4)]-
-    """
-    # currently only support up to the second order
-    assert trotter_order in [1,2]
-    n_qubits, g_coupling, pbc = tfim.parameters
-    qc = QuantumCircuit(n_qubits)
+    def build_trotter(
+            self,
+            t_tot: float, 
+            n_segments: int, 
+            trotter_order: int = 2, 
+        ) -> QuantumCircuit:
+        """
+            Build the quantum circuit of the Trotterized evolution of TFIM.
+            Unitary Rep: exp(-i t H) where H = -\sum Z_iZ_{i+1} - g \sum X_i
+            Each Trotter step:
+            -[RZZ(1,2)]------------[RX(1)]-
+            -[RZZ(1,2)]-[RZZ(2,3)]-[RX(2)]-
+            -[RZZ(3,4)]-[RZZ(2,3)]-[RX(3)]-
+            -[RZZ(3,4)]------------[RX(4)]-
+        """
+        # currently only support up to the second order
+        assert trotter_order in [1,2]
+        n_qubits, g_coupling, pbc = self.parameters
+        qc = QuantumCircuit(n_qubits)
 
-    def _build_trotter_TFIM_append_ZZ(tau_param):
-        nonlocal qc
-        for ii in range(0,n_qubits-1,2):
-            qc.rzz(-2*tau_param, ii, ii+1)
-        for ii in range(1,n_qubits-1,2):
-            qc.rzz(-2*tau_param, ii, ii+1)
-        if pbc:
-            qc.rzz(-2*tau_param, n_qubits-1, 0)
+        def _build_trotter_append_ZZ(tau_param):
+            nonlocal qc
+            for ii in range(0,n_qubits-1,2):
+                qc.rzz(-2*tau_param, ii, ii+1)
+            for ii in range(1,n_qubits-1,2):
+                qc.rzz(-2*tau_param, ii, ii+1)
+            if pbc:
+                qc.rzz(-2*tau_param, n_qubits-1, 0)
 
-    def _build_trotter_TFIM_append_X(tau_param):
-        nonlocal qc
-        for ii in range(n_qubits):
-            qc.rx(-2*tau_param*g_coupling, ii)
-    
-    tau = t_tot / n_segments
-    _build_trotter_TFIM_append_X(tau if (trotter_order == 1) else tau/2)
-    for _ in range(n_segments-1):
-        _build_trotter_TFIM_append_ZZ(tau)
-        _build_trotter_TFIM_append_X(tau)
-    _build_trotter_TFIM_append_ZZ(tau)
-    if trotter_order == 2:
-        _build_trotter_TFIM_append_X(tau/2)
-    return qc
+        def _build_trotter_append_X(tau_param):
+            nonlocal qc
+            for ii in range(n_qubits):
+                qc.rx(-2*tau_param*g_coupling, ii)
+        
+        tau = t_tot / n_segments
+        _build_trotter_append_X(tau if (trotter_order == 1) else tau/2)
+        for _ in range(n_segments-1):
+            _build_trotter_append_ZZ(tau)
+            _build_trotter_append_X(tau)
+        _build_trotter_append_ZZ(tau)
+        if trotter_order == 2:
+            _build_trotter_append_X(tau/2)
+        return qc
+
+    def apply_qsvt_xrot(
+        cls,
+        be_qc: "QuantumCircuit",
+        phi_seq_su2: NDArray[(Any,), float],
+        measure: bool = False,
+        measure_full: bool = False,
+        init_state: Optional[Union["QuantumCircuit", str]] = None
+    ) -> "QuantumCircuit":
+        """
+            Build a QSVT circuit using the phase factors in the Rx convention.
+            Rmk. The be_qc in the sequence is NOT alternated as a consequence of the
+                 use of |0x0|@U^dag + |1x1|@U (rather than |0x0|@I + |1x1|@U).
+                                (be_qc)                (be_qc)      meas,   meas_full
+            |0>   -[RX(phi_0)]-|  ctrl  |-[RX(phi_1)]-|  ctrl  |- ...   #       #
+            |psi> -------------|U+/0,U/1|-------------|U+/0,U/1|- ...   _       #
+            Args:
+                be_qc:      ctrl-(U+/0,U/1), yielded from HadamardBlockEncoding
+                phi_seq:    (phi_0,phi_1,...,phi_1,phi_0) symmetric phase factors
+                init_state: circuit preparing |psi>, or bit-str rep in comp basis
+        """
+        # only one meaurement keyword can be specified as True
+        assert (measure and measure_full) is not True
+        n_tot_qubit = be_qc.num_qubits
+        n_be_qubit = HadamardBlockEncoding._HadamardBlockEncoding__n_be_qubit
+        if measure:
+            qc = QuantumCircuit(n_tot_qubit, n_be_qubit)
+        elif measure_full:
+            qc = QuantumCircuit(n_tot_qubit, n_tot_qubit)
+        else:
+            qc = QuantumCircuit(n_tot_qubit)
+        qr = qc.qubits
+        # initial state preparation
+        if init_state is not None:
+            if isinstance(init_state, QuantumCircuit):
+                qc.append(init_state.to_instruction(), qr[n_be_qubit:])
+            elif isinstance(init_state, str):
+                assert len(init_state) == n_tot_qubit-n_be_qubit
+                for ii, bit in enumerate(init_state):
+                    if bit == "1":
+                        qc.x(qr[ii+n_be_qubit])
+            else:
+                raise TypeError(
+                        "init_state must be an instance of QuantumCircuit ot str."
+                    )
+        # build alternate X-phase modulation sequence
+        phi_seq = np.array(phi_seq_su2)
+        phi_seq[0] += np.pi/4
+        phi_seq[-1] -= np.pi/4
+        qc.rx(-2*phi_seq[-1], qr[0])
+        for phi in phi_seq[-2::-1]:
+            qc.append(be_qc.to_instruction(), qr)
+            qc.rx(-2*phi, qr[0])
+        # add measurements
+        if measure or measure_full:
+            cr = qc.clbits
+            qc.measure(qr[:len(cr)], cr)
+        return qc
+
 
 def apply_qsvt_xrot(
     be_qc: "QuantumCircuit",
-    phi_seq: NDArray[(Any,), float],
+    phi_seq_su2: NDArray[(Any,), float],
     measure: bool = False,
     measure_full: bool = False,
     init_state: Optional[Union["QuantumCircuit", str]] = None
@@ -216,6 +275,7 @@ def apply_qsvt_xrot(
                     "init_state must be an instance of QuantumCircuit ot str."
                 )
     # build alternate X-phase modulation sequence
+    phi_seq = convert_su2_to_Xrot(phi_seq_su2)
     dag = False
     be_qc_dag = be_qc.inverse()
     qc.rx(-2*phi_seq[-1], qr[0])
@@ -238,14 +298,9 @@ def convert_su2_to_Xrot(
 ) -> NDArray[(Any,), float]:
     """
         Convert the phase factors from SU2 version to that of X rotations.
-        Given a set of phase factors Phi of degree d w/ Re[<0|.|0>] = F(x)
-            if d/2 is even: Phi parameterizes (-1)^(d/2) F(x) in real comp.
-            if d/2 is odd: (phi0-pi/2, phi1, ..., phid-pi/2)->(-1)^(d/2) F(x).
-        Convert it to usual Z-rotation convention gives X-rotation convention
-            if d/2 is even:
-                (phi0+pi/4, phi1+pi/2, phi2+pi/2, ..., phu(d-1)+pi/2, phid+pi/4)
-            if d/2 is odd:
-                (phi0-pi/4, phi1+pi/2, phi2+pi/2, ..., phu(d-1)+pi/2, phid-pi/4)
+        d is even
+        phi_su2 = (phi0, phi1, phi2, ..., phi(d-2), phi(d-1), phi(d))
+        phi_xrot = (phi0-pi/4, phi1+pi/2, phi2-pi/2, ..., phi(d-2)-pi/2, phi(d-1)+pi/2, phi(d)-pi/4)        
         Attributes:
             phi_seq_su2: SU2 phase factors of even degree
             half:        only (phi0,...phi(d/2)) (left half) is given
@@ -253,23 +308,18 @@ def convert_su2_to_Xrot(
     if half:
         deg = (len(phi_seq_su2)-1) * 2
         phi_seq = np.zeros(deg+1)
-        phi_seq[1:deg//2+1] = phi_seq_su2[1:] + np.pi/2
-        phi_seq[deg//2+1:-1] = phi_seq_su2[-2:0:-1] + np.pi/2
+        phi_seq[1:deg//2+1] = phi_seq_su2[1:]
+        phi_seq[deg//2+1:-1] = phi_seq_su2[-2:0:-1]
         phi_seq[0] = phi_seq_su2[0]
         phi_seq[-1] = phi_seq_su2[0]
     else:
         deg = len(phi_seq_su2)-1
         assert deg % 2 == 0
-        phi_seq = np.zeros(deg+1)
-        phi_seq[1:-1] = phi_seq_su2[1:-1] + np.pi/2
-        phi_seq[0] = phi_seq_su2[0]
-        phi_seq[-1] = phi_seq_su2[-1]
-    if (deg//2) % 2 == 0:
-        phi_seq[0] += np.pi/4
-        phi_seq[-1] += np.pi/4
-    else:
-        phi_seq[0] -= np.pi/4
-        phi_seq[-1] -= np.pi/4
+        phi_seq = np.array(phi_seq_su2)
+    phi_seq[::2] -= np.pi/2
+    phi_seq[1::2] += np.pi/2
+    phi_seq[0] += np.pi/4
+    phi_seq[-1] += np.pi/4
     return phi_seq
 
 def convert_Zrot_to_Xrot(
@@ -277,18 +327,17 @@ def convert_Zrot_to_Xrot(
 ) -> NDArray[(Any,), float]:
     """
         Convert the phase factors from Z rotations to that of X rotations.
-            if d/2 is even:
-                xphi = zphi
-            if d/2 is odd:
-                xphi0 = zphi0 - pi/2, xphi(d) = zphi(d) - pi/2
-                xphi(i) = zphi(i) i = 1, ..., d-1
+        d is even
+        phi_su2 = (phi0, phi1, phi2, ..., phi(d-2), phi(d-1), phi(d))
+        phi_zrot = (phi0+pi/4, phi1+pi/2, phi2+pi/2, ..., phi(d-2)+pi/2, phi(d-1)+pi/2, phi(d)+pi/4)
+        phi_xrot = (phi0-pi/4, phi1+pi/2, phi2-pi/2, ..., phi(d-2)-pi/2, phi(d-1)+pi/2, phi(d)-pi/4)
     """
     deg = len(phi_seq_zrot)-1
     assert deg % 2 == 0
-    phi_seq = phi_seq_zrot
-    if (deg//2) % 2 == 1:
-        phi_seq[0] -= np.pi/2
-        phi_seq[-1] -= np.pi/2
+    phi_seq = np.array(phi_seq_zrot)
+    phi_seq[::2] -= np.pi
+    phi_seq[0] += np.pi/2
+    phi_seq[-1] += np.pi/2
     return phi_seq
 
 def measure_energy_VQEType(
