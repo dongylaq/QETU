@@ -88,8 +88,9 @@ def retrieve_state(qcircuit):
     job = execute(qcircuit, backend)
     result = job.result()
     state = result.get_statevector(qcircuit)
+
     # qiskit's column-major order
-    state_Qobj = Qobj(state, dims=[[2]*n_tot_qubit, [1]])
+    state_Qobj = Qobj(np.array(state), dims=[[2]*n_tot_qubit, [1]])
     # python's row-major order
     state_Qobj_rowmajor = state_Qobj.permute(np.arange(0,n_tot_qubit)[::-1])
     state_rowmajor = np.array(state_Qobj_rowmajor)[:,0]
