@@ -139,20 +139,15 @@ if __name__ == "__main__":
     val_H_max = val_H.max()
     grd_state = vec_H[:, val_H.argmin()]
 
-    c1 = (np.pi-2*dist) / (val_H_max - val_H_min)
-    c2 = dist - c1 * val_H_min
-    # negate t_tot to make the lowest energy highest, to be compatible with the phi_seq
-    t_tot = -tau * c1
+    # load phase factors for ground state preparation
+    *phi_seq_su2, c1, c2, _ = np.loadtxt(f"{PHI_DATA_DIR}/ground_state/phi_gsp_n{n_qubits}_d{deg}.txt")
+    phi_seq_su2 = np.array(phi_seq_su2, dtype=float)
+
+    # c1 = (np.pi-2*dist) / (val_H_max - val_H_min)
+    # c2 = dist - c1 * val_H_min
+    t_tot = tau * c1
     shift = tau * c2
 
-    # load phase factors for ground state preparation
-    *phi_qc, _ = np.loadtxt(f"{PHI_DATA_DIR}/ground_state/phi_gsp_n{n_qubits}_d{deg}.txt")
-    phi_seq_su2 = np.array(phi_qc)
-    phi_seq_su2 -= np.pi/2
-    phi_seq_su2[0] += np.pi/4
-    phi_seq_su2[-1] += np.pi/4
-    # convert to the convention of X rotations
-    phi_qc = hbe.convert_Zrot_to_Xrot(phi_qc)
     # build quantum circuits
     qc = tfim.build_trotter(t_tot, n_segments)
     had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
@@ -177,7 +172,7 @@ if __name__ == "__main__":
     plt.plot(x,y, label="filter")
     plt.plot(t_tot*val_H+shift, np.zeros(*val_H.shape), "*", label="eig val")
     plt.plot(t_tot*val_H_min+shift, 0, "^", label="grd_e (negate t_tot)")
-    plt.legend(loc="upper left")
+    plt.legend(loc="upper right")
     plt.show()
 
 

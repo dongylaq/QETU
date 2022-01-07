@@ -303,7 +303,7 @@ def convert_su2_to_Xrot(
         phi_xrot = (phi0-pi/4, phi1+pi/2, phi2-pi/2, ..., phi(d-2)-pi/2, phi(d-1)+pi/2, phi(d)-pi/4)        
         Attributes:
             phi_seq_su2: SU2 phase factors of even degree
-            half:        only (phi0,...phi(d/2)) (left half) is given
+            half:        only (phi0, ..., phi(d/2)) (left half) is given
     """
     if half:
         deg = (len(phi_seq_su2)-1) * 2
@@ -417,7 +417,7 @@ def counts_to_energy(
     data = []
     for bitstr in counts.keys():
         if bitstr[-1] == "0":
-            # reverse the bit string (qiskit reverse convention)
+            # reverse the bit string (qiskit reversed convention)
             data.append(
                 [int(bit) for bit in bitstr[-2::-1]] + [counts[bitstr]]
             )
@@ -455,10 +455,10 @@ def counts_to_energy(
                 energy_val = _unpack_query(energy_val)
                 ienergy += energy_val if sum(bits) % 2 == 0 else - energy_val
         if pbc:
-            temp = data.groupby([f"q{n_sys_qubits-1}", f"q{0}"])[["counts"]].sum()
+            temp = data.groupby([f"q{n_sys_qubits-1}", "q0"])[["counts"]].sum()
             for bits in cartesian(range(2), range(2)):
                 energy_val = temp.loc[
-                    f"q{n_sys_qubits-1} == {bits[0]} and q{0} == {bits[1]}"
+                    f"q{n_sys_qubits-1} == {bits[0]} and q0 == {bits[1]}"
                 ]
                 energy_val = _unpack_query(energy_val)
                 ienergy += energy_val if sum(bits) % 2 == 0 else - energy_val
