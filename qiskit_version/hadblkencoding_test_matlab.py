@@ -162,7 +162,7 @@ if __name__ == "__main__":
     c1 = (np.pi-2*dist) / (val_H_max - val_H_min)
     c2 = dist - c1 * val_H_min
    
-    val_H_trans = val_H * c1 + c2;
+    val_H_trans = val_H * c1 + c2
     
     t_tot = tau * c1
     shift = tau * c2
@@ -188,22 +188,14 @@ if __name__ == "__main__":
     print("computing phase factors..")
     opts = {'npts': 400, 'epsil': 0.01, 'fscale': 0.9, 'criteria': 1e-6} 
     # note that np.float64 cannot be accepted by matlab
-    phi_qc_matlab = eng.cvx_qsp_step(deg, 
+    phi_seq_matlab = eng.cvx_qsp_unwrap(deg, 
             float(sigma_mu), float(sigma_min), float(sigma_mu_m), 
             float(sigma_mu_p), float(sigma_max), 
             opts['npts'], opts['epsil'], opts['fscale'], 
             opts['criteria'])
 
-    phi_qc = np.array(phi_qc_matlab).reshape(-1)
-
-    # convert back to the su2 format
-    phi_seq_su2 = np.array(phi_qc)
-    phi_seq_su2 -= np.pi/2
-    phi_seq_su2[0] += np.pi/4
-    phi_seq_su2[-1] += np.pi/4
+    phi_seq_su2 = np.array(phi_seq_matlab).reshape(-1)
     
-    # convert to the convention of X rotations
-    phi_qc = hbe.convert_Zrot_to_Xrot(phi_qc)
     # build quantum circuits
     qc = tfim.build_trotter(t_tot, n_segments)
     had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
