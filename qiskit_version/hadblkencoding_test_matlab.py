@@ -188,8 +188,8 @@ if __name__ == "__main__":
     print("computing phase factors..")
     opts = {'npts': 400, 'epsil': 0.01, 'fscale': 0.9, 'criteria': 1e-6} 
     # note that np.float64 cannot be accepted by matlab
-    phi_seq_matlab = eng.cvx_qsp_unwrap(deg, 
-            float(sigma_mu), float(sigma_min), float(sigma_mu_m), 
+    phi_seq_matlab = eng.cvx_qsp_heaviside(deg, 
+            float(sigma_min), float(sigma_mu_m), 
             float(sigma_mu_p), float(sigma_max), 
             opts['npts'], opts['epsil'], opts['fscale'], 
             opts['criteria'])
