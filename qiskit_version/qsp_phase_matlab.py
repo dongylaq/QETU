@@ -60,7 +60,7 @@ class QSPPhase(object):
         sigma_max = lambda_to_sigma(E_min)
         
 
-        phi_seq_matlab = self.eng.cvx_qsp_heaviside(deg, 
+        phi_seq_matlab = self.eng.cvx_qsp_heaviside(int(deg), 
                 float(sigma_min), float(sigma_mu_m), 
                 float(sigma_mu_p), float(sigma_max), 
                 self.opts['npts'], self.opts['epsil'], self.opts['fscale'], 

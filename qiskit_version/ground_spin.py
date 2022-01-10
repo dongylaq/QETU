@@ -3,6 +3,8 @@
     Interface with matlab to run cvx_qsp and qsppack directly to obtain
     the approximate polynomial and phase factors.
 
+    Measure the energy with respect to polynomial degree.
+
     Last revision: 01/09/2022
 """
 from racbem import retrieve_unitary_matrix, retrieve_state
@@ -27,12 +29,11 @@ if __name__ == "__main__":
     dist = 0.1
 
     print("\n===== test ground state preparation =====")
-    n_qubits = 2
+    n_qubits = 8
     n_segments = 3
-    g_coupling = 1
+    g_coupling = 4.0
     pbc = False
     n_shots = 1_000_000
-    deg = 20
     tfim = hbe.transverse_field_Ising_model(n_qubits, g_coupling, pbc=pbc)
     H = tfim.Hamiltonian
     # shift and scale the spectrum to be in [dist, pi-dist]
@@ -50,50 +51,65 @@ if __name__ == "__main__":
     t_tot = tau * c1
     shift = tau * c2
 
-    print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}\ndeg = {:d}".format(
-        n_qubits, t_tot, n_segments, g_coupling, pbc, dist, deg
-    ))
+    print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}\n".format(
+        n_qubits, t_tot, n_segments, g_coupling, pbc, dist))
 
-
-    sigma_to_lambda = lambda x: np.arccos(2.0 * x**2 - 1.0)
-    lambda_to_sigma = lambda x: np.sqrt((1.0 + np.cos(x)) / 2)
 
     mu = 0.5 * (val_H_trans[0] + val_H_trans[1])
     gap = (val_H_trans[1] - val_H_trans[0]) 
     E_min = dist * 0.5
     E_max = np.pi - dist
+
+    print("Before transformation")
+    print(f"H_min = {val_H_min}, H_max = {val_H_max}\n")
+    print("After transformation")
+    print(f"H_min = {val_H_trans[0]}, H_max = {val_H_trans[-1]}")
+    print(f"mu = {mu}, gap = {gap}\n")
     
     qsp = QSPPhase()
-    phi_seq_su2 = qsp.cvx_qsp_heaviside(deg, 
-            E_min, mu - gap/2, mu + gap/2, E_max)
+
+    deg_list = np.arange(start=10, stop=60, step=10)
+    E_approx_list = np.zeros_like(deg_list, dtype=np.float64)
+
+    for i, deg in enumerate(deg_list):
+        print()
+        print(f"deg = {deg}")
+
+        phi_seq_su2 = qsp.cvx_qsp_heaviside(deg, 
+                E_min, mu - gap/2, mu + gap/2, E_max)
+        
+        # build quantum circuits
+        had_blk_e = hbe.HadamardBlockEncoding()
+        qc = tfim.build_trotter(t_tot, n_segments)
+        had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
     
-    # build quantum circuits
-    had_blk_e = hbe.HadamardBlockEncoding()
-    qc = tfim.build_trotter(t_tot, n_segments)
-    had_blk_e.build_from_unitary_TFIM(qc, shift = shift)
+        state_circ = tfim.apply_qsvt_xrot(had_blk_e.qc, phi_seq_su2)
+        state = retrieve_state(state_circ)
+        state = state[:2**n_qubits]
+        succ_prob = la.norm(state,2)**2
+        print("succ prob = {:.3f}".format(succ_prob))
+        state = grd_state[0] / state[0] * state
+        print("||grd_state - state_circ|| = {:.5f}".format(la.norm(grd_state - state, 2)))
+    
+        E_approx, _ = hbe.measure_energy_VQEType(tfim, state_circ, n_shots)
+        print("E_gs\t\t\t = {:.5f}\nE_recon (proj)\t\t = {:.5f}".format(
+            val_H_min, E_approx
+        ))
 
-    state_circ = tfim.apply_qsvt_xrot(had_blk_e.qc, phi_seq_su2)
-    state = retrieve_state(state_circ)
-    state = state[:2**n_qubits]
-    succ_prob = la.norm(state,2)**2
-    print("succ prob = {:.3f}".format(succ_prob))
-    state = grd_state[0] / state[0] * state
-    print("||grd_state - state_circ|| = {:.5f}".format(la.norm(grd_state - state, 2)))
+        E_approx_list[i] = E_approx
 
-    E_approx, _ = hbe.measure_energy_VQEType(tfim, state_circ, n_shots)
-    print("E_gs\t\t\t = {:.5f}\nE_recon (proj)\t\t = {:.5f}".format(
-        val_H_min, E_approx
-    ))
+    E_error_list = np.abs(E_approx_list - val_H_min)
+    
+    # plt.figure()
+    # plt.plot(deg_list, E_error_list)
+    # plt.xlabel('deg')
+    # plt.ylabel('Error')
+    # plt.show()
 
-    coef = np.real(su2qsp.build_Cheby_coef_from_phi_LS(phi_seq_su2))
-    x = np.linspace(dist/2, np.pi/2-dist/2, 1000)
-    y = su2qsp.build_Cheby_fun_from_coef(np.cos(x), coef, 0)
     plt.figure()
-    plt.plot(x,y, label="filter")
-    plt.plot(t_tot*val_H+shift, np.zeros(*val_H.shape), "*", label="eig val")
-    plt.plot(t_tot*val_H_min+shift, 0, "^", label="grd_e (negate t_tot)")
-    plt.legend(loc="upper left")
+    plt.plot(deg_list, E_approx_list, 'b-o', label='Approx')
+    plt.plot(deg_list, val_H_min * np.ones_like(deg_list), 'k--', 
+            label='Exact')
+    plt.xlabel('deg')
+    plt.ylabel('Energy')
     plt.show()
-
-
-
