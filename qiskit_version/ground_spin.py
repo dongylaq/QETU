@@ -17,9 +17,12 @@ from racbem import QSPCircuit
 from qiskit.tools.monitor import job_monitor
 from qiskit.providers.aer import AerSimulator
 from qsp_phase_matlab import QSPPhase
-import os
+import os, sys
 import su2_qsp_toolbox as su2qsp
 import matplotlib.pyplot as plt
+import json
+
+PHI_DATA_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../phi_seq"
 
 if __name__ == "__main__":
     # The overall formalism for TFIM implements F(cos(tH)) rather than F(cos(tH/2))
@@ -29,7 +32,7 @@ if __name__ == "__main__":
     dist = 0.1
 
     print("\n===== test ground state preparation =====")
-    n_qubits = 8
+    n_qubits = int(sys.argv[1])
     n_segments = 3
     g_coupling = 4.0
     pbc = False
@@ -51,9 +54,11 @@ if __name__ == "__main__":
     t_tot = tau * c1
     shift = tau * c2
 
+    if not os.path.exists(PHI_DATA_DIR+f"/ground_state/n{n_qubits}"):
+        os.mkdir(PHI_DATA_DIR+f"/ground_state/n{n_qubits}")
+
     print("n_qubits = {:d},\t t_tot = {:.3f},\t n_segments = {:d},\ng_coupling = {:.3f},\t pbc = {},\t dist = {}\n".format(
         n_qubits, t_tot, n_segments, g_coupling, pbc, dist))
-
 
     mu = 0.5 * (val_H_trans[0] + val_H_trans[1])
     gap = (val_H_trans[1] - val_H_trans[0]) 
@@ -68,8 +73,8 @@ if __name__ == "__main__":
     
     qsp = QSPPhase()
 
-    deg_list = np.arange(start=10, stop=60, step=10)
-    E_approx_list = np.zeros_like(deg_list, dtype=np.float64)
+    deg_list = np.arange(start=1, stop=61, step=1)
+    E_approx_list = np.zeros_like(deg_list, dtype=float)
 
     for i, deg in enumerate(deg_list):
         print()
@@ -77,6 +82,12 @@ if __name__ == "__main__":
 
         phi_seq_su2 = qsp.cvx_qsp_heaviside(deg, 
                 E_min, mu - gap/2, mu + gap/2, E_max)
+        
+        np.savetxt(
+            PHI_DATA_DIR+f"/ground_state/n{n_qubits}/phi_gsp_n{n_qubits}_d{deg}.txt",
+            np.concatenate((phi_seq_su2, np.array([c1,c2,qsp.opts["fscale"]],dtype=float))),
+            fmt = "%.15f"
+        )
         
         # build quantum circuits
         had_blk_e = hbe.HadamardBlockEncoding()
@@ -97,8 +108,19 @@ if __name__ == "__main__":
         ))
 
         E_approx_list[i] = E_approx
+    
+    np.save(
+        PHI_DATA_DIR+f"/ground_state/n{n_qubits}/approx.npy",
+        np.append(E_approx_list, val_H_min)
+    )
 
     E_error_list = np.abs(E_approx_list - val_H_min)
+    with open(PHI_DATA_DIR+f"/ground_state/n{n_qubits}/precision.txt", "w") as f:
+        data = dict(zip(deg_list.tolist(), E_error_list.tolist()))
+        data["exact"] = val_H_min
+        f.write(
+            json.dumps(data, indent=4, separators=(',', ': '))
+        )
     
     # plt.figure()
     # plt.plot(deg_list, E_error_list)
@@ -107,9 +129,11 @@ if __name__ == "__main__":
     # plt.show()
 
     plt.figure()
-    plt.plot(deg_list, E_approx_list, 'b-o', label='Approx')
-    plt.plot(deg_list, val_H_min * np.ones_like(deg_list), 'k--', 
+    plt.plot(deg_list, E_approx_list, '-o', label='Approx')
+    plt.plot(deg_list, val_H_min * np.ones_like(deg_list), '--', 
             label='Exact')
     plt.xlabel('deg')
     plt.ylabel('Energy')
-    plt.show()
+    fig = plt.gcf()
+    fig.savefig(PHI_DATA_DIR+f"/ground_state/n{n_qubits}/precision.pdf", 
+        format='pdf', dpi=1000, bbox_inches='tight', pad_inches = 0)

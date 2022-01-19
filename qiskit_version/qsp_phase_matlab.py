@@ -46,7 +46,7 @@ class QSPPhase(object):
                 'criteria': 1e-6,
                 } 
 
-    def cvx_qsp_heaviside(self, deg, E_min, E_mu_m, E_mu_p, E_max):
+    def cvx_qsp_heaviside(self, deg, E_min, E_mu_m, E_mu_p, E_max, verbose=False):
         """ Evaluate the phase factors approximating a Heaviside
         function of degree deg, which is approximately 1 on 
         [E_min, E_mu_m], and approximately 0 on [E_mu_p, E_max]. 
@@ -64,7 +64,7 @@ class QSPPhase(object):
                 float(sigma_min), float(sigma_mu_m), 
                 float(sigma_mu_p), float(sigma_max), 
                 self.opts['npts'], self.opts['epsil'], self.opts['fscale'], 
-                self.opts['criteria'])
+                self.opts['criteria'], int(verbose))
 
         phi_seq_su2 = np.array(phi_seq_matlab).reshape(-1)
 

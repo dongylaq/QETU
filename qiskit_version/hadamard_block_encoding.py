@@ -193,6 +193,7 @@ class transverse_field_Ising_model(object):
                 be_qc:      ctrl-(U+/0,U/1), yielded from HadamardBlockEncoding
                 phi_seq:    (phi_0,phi_1,...,phi_1,phi_0) symmetric phase factors
                 init_state: circuit preparing |psi>, or bit-str rep in comp basis
+            Rmk: phi_seq degree is NOT required to be even for TFIM.
         """
         # only one meaurement keyword can be specified as True
         assert (measure and measure_full) is not True
@@ -216,7 +217,7 @@ class transverse_field_Ising_model(object):
                         qc.x(qr[ii+n_be_qubit])
             else:
                 raise TypeError(
-                        "init_state must be an instance of QuantumCircuit ot str."
+                        "init_state must be an instance of QuantumCircuit or str."
                     )
         # build alternate X-phase modulation sequence
         phi_seq = np.array(phi_seq_su2)
@@ -238,7 +239,8 @@ def apply_qsvt_xrot(
     phi_seq_su2: NDArray[(Any,), float],
     measure: bool = False,
     measure_full: bool = False,
-    init_state: Optional[Union["QuantumCircuit", str]] = None
+    init_state: Optional[Union["QuantumCircuit", str]] = None,
+    turn_off_rot: bool = False
 ) -> "QuantumCircuit":
     """
         Build a QSVT circuit using the phase factors in the Rx convention.
@@ -272,20 +274,22 @@ def apply_qsvt_xrot(
                     qc.x(qr[ii+n_be_qubit])
         else:
             raise TypeError(
-                    "init_state must be an instance of QuantumCircuit ot str."
+                    "init_state must be an instance of QuantumCircuit or str."
                 )
     # build alternate X-phase modulation sequence
     phi_seq = convert_su2_to_Xrot(phi_seq_su2)
     dag = False
     be_qc_dag = be_qc.inverse()
-    qc.rx(-2*phi_seq[-1], qr[0])
+    if not turn_off_rot:
+        qc.rx(-2*phi_seq[-1], qr[0])
     for phi in reversed(phi_seq[:-1]):
         if dag:
             qc.append(be_qc_dag.to_instruction(), qr)
         else:
             qc.append(be_qc.to_instruction(), qr)
         dag = not dag
-        qc.rx(-2*phi, qr[0])
+        if not turn_off_rot:
+            qc.rx(-2*phi, qr[0])
     # add measurements
     if measure or measure_full:
         cr = qc.clbits
@@ -340,12 +344,9 @@ def convert_Zrot_to_Xrot(
     phi_seq[-1] += np.pi/2
     return phi_seq
 
-def measure_energy_VQEType(
-    tfim: transverse_field_Ising_model,
+def circuit_energy_VQEType(
     state_circ: "QuantumCircuit",
-    meas_shots: Union[int, Tuple[int, int]],
-    noise_model: Optional[Union["NoiseModel", Tuple["NoiseModel", "NoiseModel"]]] = None
-) -> Tuple[float, Tuple[Dict[str, int], Dict[str, int]]]:
+) -> Tuple["QuantumCircuit"]:
     """
         Build quantum circuits for the energy measurement.
         Input
@@ -358,6 +359,32 @@ def measure_energy_VQEType(
         (2) measuring in Had. basis
             |0>   -[state_circ]-------- # w/ 0
             |0^n> -[state_circ]-[H(n)]- # -> dict
+    """
+    state_circ_wo_meas = state_circ.remove_final_measurements(inplace = False)
+    n_tot_qubits = state_circ_wo_meas.num_qubits
+    # Circuit (1)
+    circ_comp = QuantumCircuit(n_tot_qubits, n_tot_qubits)
+    circ_comp.append(state_circ_wo_meas.to_instruction(), range(n_tot_qubits))
+    circ_comp.measure_all(add_bits = False)
+    # Circuit (2)
+    circ_had = QuantumCircuit(n_tot_qubits, n_tot_qubits)
+    circ_had.append(state_circ_wo_meas.to_instruction(), range(n_tot_qubits))
+    for qri in range(1,n_tot_qubits):
+        circ_had.h(qri)
+    circ_had.measure_all(add_bits = False)
+    return circ_comp, circ_had
+
+def measure_energy_VQEType(
+    tfim: transverse_field_Ising_model,
+    state_circ: "QuantumCircuit",
+    meas_shots: Union[int, Tuple[int, int]],
+    noise_model: Optional[Union["NoiseModel", Tuple["NoiseModel", "NoiseModel"]]] = None
+) -> Tuple[float, Tuple[Dict[str, int], Dict[str, int]]]:
+    """
+        Measure energy using the VQE type method.
+        Input
+            |0>   -[state_circ]- # w/ 0
+            |0^n> -[state_circ]- |psi>
     """
     if isinstance(meas_shots, int):
         meas_shots_comp = meas_shots
@@ -378,23 +405,14 @@ def measure_energy_VQEType(
     else:
         raise TypeError("noise_model must be None, NoiseModel or Tuple[NoiseModel]")
     _, g_coupling, _ = tfim.parameters
-    state_circ_wo_meas = state_circ.remove_final_measurements(inplace = False)
-    n_tot_qubits = state_circ_wo_meas.num_qubits
+    circ_comp, circ_had = circuit_energy_VQEType(state_circ)
     backend = AerSimulator()
     # Circuit (1)
-    circ_comp = QuantumCircuit(n_tot_qubits, n_tot_qubits)
-    circ_comp.append(state_circ_wo_meas.to_instruction(), range(n_tot_qubits))
-    circ_comp.measure_all(add_bits = False)
     job = execute(circ_comp, backend, shots = meas_shots_comp, optimization_level = 0)
     res_comp = job.result()
     counts_comp = res_comp.get_counts(circ_comp)
     energy_zz = counts_to_energy(counts_comp, "zz")
     # Circuit (2)
-    circ_had = QuantumCircuit(n_tot_qubits, n_tot_qubits)
-    circ_had.append(state_circ_wo_meas.to_instruction(), range(n_tot_qubits))
-    for qri in range(1,n_tot_qubits):
-        circ_had.h(qri)
-    circ_had.measure_all(add_bits = False)
     job = execute(circ_had, backend, shots = meas_shots_had, optimization_level = 0)
     res_had = job.result()
     counts_had = res_had.get_counts(circ_had)
