@@ -37,8 +37,9 @@ PHI_DATA_DIR = os.path.dirname(os.path.abspath(__file__)) + "/../phi_seq/ground_
 if __name__ == "__main__":
     backend_name = sys.argv[1]
     n_qubits = int(sys.argv[2])
+    opt_level = int(sys.argv[3])
     savepath = os.path.dirname(os.path.abspath(__file__)) + \
-        f"/data/ground/ibmq/{backend_name}"
+        f"/data/ground/ibmq/{backend_name}/{opt_level}"
     os.makedirs(savepath, exist_ok=True)
     deg_list = get_deg_list(n_qubits, even_only=True)
     savedatapath = savepath + f"/n{n_qubits}.pkl"
@@ -54,7 +55,7 @@ if __name__ == "__main__":
     tot_q_device = backend.configuration().n_qubits
     assert tot_q_device >= n_qubits + 1
 
-    n_segments = 3
+    n_segments = 1
     g_coupling = 4.0
     pbc = False
     n_shots = 8192
@@ -81,7 +82,7 @@ if __name__ == "__main__":
         state_circ = hbe.apply_qsvt_xrot(had_blk_e.qc, phi_seq_su2)
         circ_zz, circ_x = hbe.circuit_energy_VQEType(state_circ)
         for compiled_circ in [circ_wo_rot, circ_zz, circ_x]:
-            job = execute(compiled_circ, backend, shots = n_shots, optimization_level = 3)
+            job = execute(compiled_circ, backend, shots = n_shots, optimization_level = opt_level)
             job_list.append([job, compiled_circ])
         for job, compiled_circ in job_list:
             result = job.result()

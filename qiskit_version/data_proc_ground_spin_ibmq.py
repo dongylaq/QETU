@@ -64,16 +64,16 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(1,1,figsize=(6,6))
     plt.subplots_adjust(top=0.9, bottom=0.225, hspace=0.25, wspace=0.28)
     label_list = [
-        "opt level = 0", # "opt level = 0 (corrected)",
-        "opt level = 3", # "opt level = 3 (corrected)",
+        "opt level = 0", "opt level = 0 (corrected)",
+        "opt level = 3", "opt level = 3 (corrected)",
         "noiseless", "exact"
     ]
     l_list = []
     for ii in range(2):
         l_temp, = ax.plot(deg_list, E_est[:,ii], marker = markers[ii], ls = lines[ii], alpha = 1)
         l_list.append(l_temp)
-        # l_temp, = ax.plot(deg_list, E_est_cor[:,ii], marker = markers[ii], ls = lines[ii], alpha = 0.25)
-        # l_list.append(l_temp)
+        l_temp, = ax.plot(deg_list, E_est_cor[:,ii], marker = markers[ii], ls = lines[ii], alpha = 0.25)
+        l_list.append(l_temp)
     l_temp, = ax.plot(deg_list, E_approx, marker = markers[2], ls = lines[2], alpha = 1)
     l_list.append(l_temp)
     l_temp, = ax.plot(deg_list, val_H_min * np.ones_like(deg_list), ls = lines[3], alpha = 1)
