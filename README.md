@@ -12,12 +12,17 @@
 - nptyping
 
 ### Matlab interface
-- Matlab >= R2021b
-The installation of "Matlab engine" is referred to https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html
-If running the installation listed in the instruction in Matlab commandline is troublesome, please run the code directly in the terminal.
+- Matlab >= R2020b 
+The official instruction installation of "Matlab engine" can be found here https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html.
+Before installing, please check the compatibility between the matlab and
+python versions
+https://www.mathworks.com/content/dam/mathworks/mathworks-dot-com/support/sysreq/files/python-compatibility.pdf.
+For instance, python 3.8 is only supported with a Matlab version >= R2020b.
+The best platform independent way of installing the python interface is
+to use the Matlab command prompt. 
 
-        cd "matlabroot"/extern/engines/python
-        python setup.py install
+        cd (fullfile(matlabroot,'extern','engines','python'))
+        system('python setup.py install')
 
 The expected output is as follows.
 
@@ -29,6 +34,13 @@ The expected output is as follows.
         running install_egg_info
         Removing /Users/dongyl/opt/anaconda3/lib/python3.9/site-packages/matlabengineforpython-R2021b-py3.9.egg-info
         Writing /Users/dongyl/opt/anaconda3/lib/python3.9/site-packages/matlabengineforpython-R2021b-py3.9.egg-info
+
+At a macOS or Linux operating system prompt, you can also run the following command in the terminal (you might need administrator privileges to execute these commands. Here you need to replace the "matlabroot" by the proper matlabroot folder)
+
+        cd "matlabroot"/extern/engines/python
+        python setup.py install
+
+
 
 ## Test example
 When the requirements are installed, the package can be tested by running the code.
