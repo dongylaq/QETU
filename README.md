@@ -15,9 +15,12 @@
 - Matlab >= R2021b
 The installation of "Matlab engine" is referred to https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html
 If running the installation listed in the instruction in Matlab commandline is troublesome, please run the code directly in the terminal.
-- cd "matlabroot"/extern/engines/python
-- python setup.py install
+
+        cd "matlabroot"/extern/engines/python
+        python setup.py install
+
 The expected output is as follows.
+
         running install
         running build
         running build_py
@@ -29,8 +32,11 @@ The expected output is as follows.
 
 ## Test example
 When the requirements are installed, the package can be tested by running the code.
+
         python test_qet_u.py
+
 The expected output is as follows (with one figure).
+
         ===== test TFIM =====
         n_qubits = 4,    t_tot = 0.15453532924152408,    n_segments = 3,
         g_coupling = 1,  pbc = False,    dist = 0.1
